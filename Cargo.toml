@@ -1,0 +1,7 @@
+[package]
+name = "icmsg"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+elain = "0.3.1"
