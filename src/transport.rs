@@ -39,6 +39,10 @@ where
     /// See [`MemoryConfig`][`super::MemoryConfig`] for information about the parameters.
     ///
     /// [bonding]: https://docs.zephyrproject.org/latest/services/ipc/ipc_service/backends/ipc_service_icmsg.html#bonding
+    ///
+    /// # Safety
+    ///
+    /// The parameters must follow the requirements detailed in [`MemoryConfig`][`super::MemoryConfig`].
     pub unsafe fn new(
         send_region: *mut (),
         recv_region: *mut (),

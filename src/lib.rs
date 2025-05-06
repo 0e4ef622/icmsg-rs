@@ -6,7 +6,7 @@
 
 #![no_std]
 
-use core::{pin::pin, task::Poll};
+use core::pin::pin;
 
 use embassy_futures::select::{Either, select};
 use embedded_hal_async::delay::DelayNs;
@@ -38,7 +38,9 @@ where
 {
     /// Create a new IcMsg channel and perform [bonding][bond].
     ///
-    /// SAFETY: The provided [`MemoryConfig`] must be correct.
+    /// # Safety
+    ///
+    /// The provided [`MemoryConfig`] must be correct.
     ///
     /// [bond]: https://docs.zephyrproject.org/latest/services/ipc/ipc_service/backends/ipc_service_icmsg.html#bonding
     pub async unsafe fn init(
@@ -117,7 +119,7 @@ where
             match self.transport.try_recv(msg) {
                 Ok(n) => return Ok(n),
                 Err(transport::RecvError::Empty) => {
-                    if let Poll::Pending = r {
+                    if r.is_pending() {
                         wait_fut.await;
                     }
                 }
