@@ -306,19 +306,24 @@ pub mod tests {
     #[test]
     fn test_send_recv() {
         let expected_messages: &[&[u8]] = &[
-            b"", b"0", b"01", b"012", b"0123", b"01234", b"012345", b"0123456", b"01234567"
+            b"",
+            b"0",
+            b"01",
+            b"012",
+            b"0123",
+            b"01234",
+            b"012345",
+            b"0123456",
+            b"01234567",
         ];
-
 
         const ALIGN: usize = 4;
         type Hdr = SharedMemoryRegionHeader<ALIGN>;
         let buf_size = 16;
         let shared_region_layout =
             Layout::from_size_align(size_of::<Hdr>() + buf_size, align_of::<Hdr>()).unwrap();
-        let shared_region_1 =
-            unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
-        let shared_region_2 =
-            unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
+        let shared_region_1 = unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
+        let shared_region_2 = unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
         let shared_region_sync_1 = SyncThing(shared_region_1);
         let shared_region_sync_2 = SyncThing(shared_region_2);
 
@@ -406,10 +411,11 @@ pub mod tests {
     impl<T: Future> core::future::Future for SyncThing<T> {
         type Output = T::Output;
 
-        fn poll(self: core::pin::Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> core::task::Poll<Self::Output> {
-            unsafe {
-                self.map_unchecked_mut(|x| &mut x.0).poll(cx)
-            }
+        fn poll(
+            self: core::pin::Pin<&mut Self>,
+            cx: &mut core::task::Context<'_>,
+        ) -> core::task::Poll<Self::Output> {
+            unsafe { self.map_unchecked_mut(|x| &mut x.0).poll(cx) }
         }
     }
 }

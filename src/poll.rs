@@ -1,6 +1,9 @@
 //! The `poll` macro copied from the `futures` crate.
 
-use core::{pin::Pin, task::{Context, Poll}};
+use core::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 macro_rules! poll {
     ($x:expr $(,)?) => {

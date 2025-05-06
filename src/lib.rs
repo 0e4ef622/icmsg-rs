@@ -173,14 +173,13 @@ pub enum InitError {
     BondingWrongMagic,
 }
 
-
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use embedded_hal_async::delay::DelayNs;
-    use tokio::sync::Notify;
     use std::sync::Arc;
+    use tokio::sync::Notify;
 
     use crate::{
         Notifier, WaitForNotify,
@@ -227,8 +226,8 @@ mod tests {
                 };
                 let mut icmsg = unsafe {
                     IcMsg::<_, _, ALIGN>::init(config, &*notify_2, &*notify_1, TokioDelay)
-                    .await
-                    .unwrap()
+                        .await
+                        .unwrap()
                 };
 
                 // receive messages
@@ -262,8 +261,8 @@ mod tests {
         };
         let mut icmsg = unsafe {
             IcMsg::<_, _, ALIGN>::init(config, &*notify_1, &*notify_2, TokioDelay)
-            .await
-            .unwrap()
+                .await
+                .unwrap()
         };
 
         // send messages
