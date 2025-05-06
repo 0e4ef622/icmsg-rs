@@ -291,7 +291,7 @@ mod integer {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     extern crate std;
 
     use super::{IcMsgTransport, Notifier, RecvError, SharedMemoryRegionHeader};
@@ -309,6 +309,7 @@ mod tests {
             b"", b"0", b"01", b"012", b"0123", b"01234", b"012345", b"0123456", b"01234567"
         ];
 
+
         const ALIGN: usize = 4;
         type Hdr = SharedMemoryRegionHeader<ALIGN>;
         let buf_size = 16;
@@ -318,8 +319,8 @@ mod tests {
             unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
         let shared_region_2 =
             unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
-        let shared_region_sync_1 = SyncPtr(shared_region_1);
-        let shared_region_sync_2 = SyncPtr(shared_region_2);
+        let shared_region_sync_1 = SyncThing(shared_region_1);
+        let shared_region_sync_2 = SyncThing(shared_region_2);
 
         let recv_thread = std::thread::spawn(move || {
             let shared_region_1 = { shared_region_sync_1 }.0;
@@ -342,7 +343,7 @@ mod tests {
                         std::thread::park();
                         first = false;
                     }
-                    let r = unsafe { icmsg.try_recv(&mut buf) };
+                    let r = icmsg.try_recv(&mut buf);
                     if r == Err(RecvError::Empty) {
                         std::thread::park();
                         continue;
@@ -397,8 +398,18 @@ mod tests {
         fn notify(&mut self) {}
     }
 
+    /// Make something unconditionally Send + Sync. Use with care.
     #[derive(Copy, Clone)]
-    struct SyncPtr<T>(*mut T);
-    unsafe impl<T> Send for SyncPtr<T> {}
-    unsafe impl<T> Sync for SyncPtr<T> {}
+    pub(crate) struct SyncThing<T>(pub T);
+    unsafe impl<T> Send for SyncThing<T> {}
+    unsafe impl<T> Sync for SyncThing<T> {}
+    impl<T: Future> core::future::Future for SyncThing<T> {
+        type Output = T::Output;
+
+        fn poll(self: core::pin::Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> core::task::Poll<Self::Output> {
+            unsafe {
+                self.map_unchecked_mut(|x| &mut x.0).poll(cx)
+            }
+        }
+    }
 }

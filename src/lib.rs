@@ -6,13 +6,15 @@
 
 #![no_std]
 
-use core::pin::pin;
+use core::{pin::pin, task::Poll};
 
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{Either, select};
 use embedded_hal_async::delay::DelayNs;
 use transport::IcMsgTransport;
 pub use transport::Notifier;
 pub mod transport;
+#[macro_use]
+mod poll;
 
 const MAGIC: [u8; 13] = [
     0x45, 0x6d, 0x31, 0x6c, 0x31, 0x4b, 0x30, 0x72, 0x6e, 0x33, 0x6c, 0x69, 0x34,
@@ -66,7 +68,9 @@ where
             }
         };
 
-        this.transport.send(&MAGIC).map_err(InitError::BondingSendError)?;
+        this.transport
+            .send(&MAGIC)
+            .map_err(InitError::BondingSendError)?;
 
         // Repeat the notification every 1 ms until a notification is received.
         {
@@ -78,17 +82,48 @@ where
                     Either::Second(_) => this.transport.notify(),
                 }
             }
+            this.transport.notify();
         }
 
         // Allow larger messages for forward compatibility.
         let mut message = [0; 32];
-        this.transport.try_recv(&mut message).map_err(InitError::BondingRecvError)?;
+        this.transport
+            .try_recv(&mut message)
+            .map_err(InitError::BondingRecvError)?;
 
         if message.get(..MAGIC.len()) != Some(&MAGIC) {
             return Err(InitError::BondingWrongMagic);
         }
 
         Ok(this)
+    }
+
+    /// Send a message
+    pub fn send(&mut self, msg: &[u8]) -> Result<(), transport::SendError> {
+        self.transport.send(msg)
+    }
+
+    /// Receive a message. On success, returns the size of the message.
+    pub fn try_recv(&mut self, msg: &mut [u8]) -> Result<usize, transport::RecvError> {
+        self.transport.try_recv(msg)
+    }
+
+    pub async fn recv(&mut self, msg: &mut [u8]) -> Result<usize, transport::RecvError> {
+        loop {
+            // Let the waiter register its waker before attempting to recv
+            let mut wait_fut = pin!(self.waiter.wait_for_notify());
+            let r = poll!(wait_fut.as_mut());
+
+            match self.transport.try_recv(msg) {
+                Ok(n) => return Ok(n),
+                Err(transport::RecvError::Empty) => {
+                    if let Poll::Pending = r {
+                        wait_fut.await;
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 }
 
@@ -136,4 +171,153 @@ pub enum InitError {
     BondingRecvError(transport::RecvError),
     /// The magic sequence was not received during bonding.
     BondingWrongMagic,
+}
+
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use embedded_hal_async::delay::DelayNs;
+    use tokio::sync::Notify;
+    use std::sync::Arc;
+
+    use crate::{
+        Notifier, WaitForNotify,
+        transport::{SharedMemoryRegionHeader, tests::SyncThing},
+    };
+
+    use super::{IcMsg, MemoryConfig};
+    use core::{alloc::Layout, time::Duration};
+
+    #[tokio::main]
+    #[test]
+    async fn test_bonding() {
+        let expected_messages: &[&[u8]] = &[
+            b"",
+            b"0",
+            b"01",
+            b"012",
+            b"0123",
+            b"01234",
+            b"012345",
+            b"0123456",
+            b"01234567",
+        ];
+
+        const ALIGN: usize = 4;
+        type Hdr = SharedMemoryRegionHeader<ALIGN>;
+        let buf_size = 24;
+        let shared_region_layout =
+            Layout::from_size_align(size_of::<Hdr>() + buf_size, align_of::<Hdr>()).unwrap();
+        let shared_region_1 = unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
+        let shared_region_2 = unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
+        let notify_1 = Arc::new(Notify::new());
+        let notify_2 = Arc::new(Notify::new());
+
+        let recv_task = tokio::spawn(SyncThing({
+            let notify_1 = Arc::clone(&notify_1);
+            let notify_2 = Arc::clone(&notify_2);
+            async move {
+                let config = MemoryConfig {
+                    send_region: shared_region_2,
+                    recv_region: shared_region_1,
+                    send_buffer_len: buf_size as u32,
+                    recv_buffer_len: buf_size as u32,
+                };
+                let mut icmsg = unsafe {
+                    IcMsg::<_, _, ALIGN>::init(config, &*notify_2, &*notify_1, TokioDelay)
+                    .await
+                    .unwrap()
+                };
+
+                // receive messages
+                let mut buf = [0; 8];
+                for &expected_message in expected_messages {
+                    let n = icmsg.recv(&mut buf).await.unwrap();
+                    std::eprintln!("task 2 recv'd {:?}", &buf[..n]);
+                    assert_eq!(&buf[..n], expected_message);
+                }
+
+                // send messages
+                for msg in expected_messages {
+                    loop {
+                        let r = icmsg.send(msg);
+                        if r.is_err() {
+                            tokio::task::yield_now().await;
+                            continue;
+                        }
+                        std::eprintln!("task 2 sent {msg:?}");
+                        break;
+                    }
+                }
+            }
+        }));
+
+        let config = MemoryConfig {
+            send_region: shared_region_1,
+            recv_region: shared_region_2,
+            send_buffer_len: buf_size as u32,
+            recv_buffer_len: buf_size as u32,
+        };
+        let mut icmsg = unsafe {
+            IcMsg::<_, _, ALIGN>::init(config, &*notify_1, &*notify_2, TokioDelay)
+            .await
+            .unwrap()
+        };
+
+        // send messages
+        for msg in expected_messages {
+            loop {
+                let r = icmsg.send(msg);
+                if r.is_err() {
+                    tokio::task::yield_now().await;
+                    continue;
+                }
+                std::eprintln!("task 1 sent {msg:?}");
+                break;
+            }
+        }
+
+        // receive messages
+        let mut buf = [0; 8];
+        for &expected_message in expected_messages {
+            let n = icmsg.recv(&mut buf).await.unwrap();
+            std::eprintln!("task 1 recv'd {:?}", &buf[..n]);
+            assert_eq!(&buf[..n], expected_message);
+        }
+
+        recv_task.await.unwrap();
+        unsafe {
+            std::alloc::dealloc(shared_region_1.cast(), shared_region_layout);
+            std::alloc::dealloc(shared_region_2.cast(), shared_region_layout);
+        }
+    }
+
+    impl Notifier for &'_ Notify {
+        fn notify(&mut self) {
+            self.notify_waiters()
+        }
+    }
+
+    impl WaitForNotify for &'_ Notify {
+        fn wait_for_notify(&mut self) -> impl Future<Output = ()> {
+            self.notified()
+        }
+    }
+
+    struct TokioDelay;
+    impl DelayNs for TokioDelay {
+        fn delay_ns(&mut self, ns: u32) -> impl Future<Output = ()> {
+            tokio::time::sleep(Duration::from_nanos(ns as u64))
+        }
+
+        fn delay_us(&mut self, us: u32) -> impl Future<Output = ()> {
+            tokio::time::sleep(Duration::from_micros(us as u64))
+        }
+
+        fn delay_ms(&mut self, ms: u32) -> impl Future<Output = ()> {
+            tokio::time::sleep(Duration::from_millis(ms as u64))
+        }
+    }
 }
