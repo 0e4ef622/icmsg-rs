@@ -26,8 +26,8 @@ where
     W: WaitForNotify,
     elain::Align<ALIGN>: elain::Alignment,
 {
-    transport: transport::IcMsgTransport<M, ALIGN>,
-    waiter: W,
+    sender: Sender<M, ALIGN>,
+    receiver: Receiver<W, ALIGN>,
 }
 
 impl<M, W, const ALIGN: usize> IcMsg<M, W, ALIGN>
@@ -46,7 +46,7 @@ where
     pub async unsafe fn init(
         config: MemoryConfig,
         notifier: M,
-        waiter: W,
+        mut waiter: W,
         mut delay: impl DelayNs,
     ) -> Result<Self, InitError> {
         if config.send_buffer_len % 4 != 0 || config.recv_buffer_len % 4 != 0 {
@@ -57,39 +57,36 @@ where
             return Err(InitError::TooSmall);
         }
 
-        let mut this = unsafe {
-            Self {
-                transport: IcMsgTransport::new(
-                    config.send_region,
-                    config.recv_region,
-                    config.send_buffer_len,
-                    config.recv_buffer_len,
-                    notifier,
-                ),
-                waiter,
-            }
+        let mut transport = unsafe {
+            IcMsgTransport::new(
+                config.send_region,
+                config.recv_region,
+                config.send_buffer_len,
+                config.recv_buffer_len,
+                notifier,
+            )
         };
 
-        this.transport
+        transport
             .send(&MAGIC)
             .map_err(InitError::BondingSendError)?;
 
         // Repeat the notification every 1 ms until a notification is received.
         {
-            let mut wait_fut = pin!(this.waiter.wait_for_notify());
+            let mut wait_fut = pin!(waiter.wait_for_notify());
             loop {
                 let timeout = delay.delay_ms(1);
                 match select(wait_fut.as_mut(), timeout).await {
                     Either::First(_) => break,
-                    Either::Second(_) => this.transport.notify(),
+                    Either::Second(_) => transport.notify(),
                 }
             }
-            this.transport.notify();
+            transport.notify();
         }
 
         // Allow larger messages for forward compatibility.
         let mut message = [0; 32];
-        this.transport
+        transport
             .try_recv(&mut message)
             .map_err(InitError::BondingRecvError)?;
 
@@ -97,19 +94,80 @@ where
             return Err(InitError::BondingWrongMagic);
         }
 
-        Ok(this)
+        let (s, r) = transport.split();
+        let sender = Sender { transport: s };
+        let receiver = Receiver {
+            transport: r,
+            waiter,
+        };
+
+        Ok(Self { sender, receiver })
     }
 
     /// Send a message
     pub fn send(&mut self, msg: &[u8]) -> Result<(), transport::SendError> {
-        self.transport.send(msg)
+        self.sender.send(msg)
     }
 
     /// Receive a message. On success, returns the size of the message.
     pub fn try_recv(&mut self, msg: &mut [u8]) -> Result<usize, transport::RecvError> {
+        self.receiver.try_recv(msg)
+    }
+
+    pub fn recv(
+        &mut self,
+        msg: &mut [u8],
+    ) -> impl Future<Output = Result<usize, transport::RecvError>> {
+        self.receiver.recv(msg)
+    }
+
+    pub fn split(self) -> (Sender<M, ALIGN>, Receiver<W, ALIGN>) {
+        (self.sender, self.receiver)
+    }
+
+    pub fn split_mut(&mut self) -> (&mut Sender<M, ALIGN>, &mut Receiver<W, ALIGN>) {
+        (&mut self.sender, &mut self.receiver)
+    }
+}
+
+pub struct Sender<M, const ALIGN: usize>
+where
+    M: Notifier,
+    elain::Align<ALIGN>: elain::Alignment,
+{
+    transport: transport::Sender<M, ALIGN>,
+}
+
+impl<M, const ALIGN: usize> Sender<M, ALIGN>
+where
+    M: Notifier,
+    elain::Align<ALIGN>: elain::Alignment,
+{
+    pub fn send(&mut self, msg: &[u8]) -> Result<(), transport::SendError> {
+        self.transport.send(msg)
+    }
+}
+
+pub struct Receiver<W, const ALIGN: usize>
+where
+    W: WaitForNotify,
+    elain::Align<ALIGN>: elain::Alignment,
+{
+    transport: transport::Receiver<ALIGN>,
+    waiter: W,
+}
+
+impl<W, const ALIGN: usize> Receiver<W, ALIGN>
+where
+    W: WaitForNotify,
+    elain::Align<ALIGN>: elain::Alignment,
+{
+    /// Try to receive a message if one is available. On success, returns the size of the message.
+    pub fn try_recv(&mut self, msg: &mut [u8]) -> Result<usize, transport::RecvError> {
         self.transport.try_recv(msg)
     }
 
+    /// Wait for and receive a message. On success, returns the size of the message.
     pub async fn recv(&mut self, msg: &mut [u8]) -> Result<usize, transport::RecvError> {
         loop {
             // Let the waiter register its waker before attempting to recv
@@ -141,7 +199,7 @@ where
 ///
 /// [ref]: https://docs.zephyrproject.org/latest/services/ipc/ipc_service/backends/ipc_service_icmsg.html#shared-memory-region-organization
 /// [data]: https://docs.zephyrproject.org/latest/services/ipc/ipc_service/backends/ipc_service_icmsg.html#shared-memory-region-organization
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct MemoryConfig {
     /// Pointer to the send memory region.
     pub send_region: *mut (),

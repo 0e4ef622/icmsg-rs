@@ -14,18 +14,8 @@ where
     M: Notifier,
     elain::Align<ALIGN>: elain::Alignment,
 {
-    send_region: *mut SharedMemoryRegionHeader<ALIGN>,
-    recv_region: *mut SharedMemoryRegionHeader<ALIGN>,
-
-    // size of the data field, not including the header. must be a multiple of 4
-    send_buffer_len: u32,
-    // size of the data field, not including the header. must be a multiple of 4
-    recv_buffer_len: u32,
-    mbox: M,
-
-    // local copies to prevent the other side from interfering
-    send_wr_idx: u32,
-    recv_rd_idx: u32,
+    sender: Sender<M, ALIGN>,
+    receiver: Receiver<ALIGN>,
 }
 
 impl<M, const ALIGN: usize> IcMsgTransport<M, ALIGN>
@@ -60,22 +50,140 @@ where
             (*send_region).wr_idx.value.store(0, Ordering::Relaxed);
             (*send_region).rd_idx.value.store(0, Ordering::Relaxed);
         }
-        Self {
+
+        let sender = Sender {
             send_region,
-            recv_region,
             send_buffer_len,
-            recv_buffer_len,
             mbox,
             send_wr_idx: 0,
+        };
+        let receiver = Receiver {
+            recv_region,
+            recv_buffer_len,
             recv_rd_idx: 0,
-        }
+        };
+        Self { sender, receiver }
     }
 
     /// Notify the other end.
     pub fn notify(&mut self) {
-        self.mbox.notify()
+        self.sender.notify()
     }
 
+    pub fn send(&mut self, msg: &[u8]) -> Result<(), SendError> {
+        self.sender.send(msg)
+    }
+
+    pub fn try_recv(&mut self, msg: &mut [u8]) -> Result<usize, RecvError> {
+        self.receiver.try_recv(msg)
+    }
+
+    pub fn split(self) -> (Sender<M, ALIGN>, Receiver<ALIGN>) {
+        (self.sender, self.receiver)
+    }
+
+    pub fn split_mut(&mut self) -> (&mut Sender<M, ALIGN>, &mut Receiver<ALIGN>) {
+        (&mut self.sender, &mut self.receiver)
+    }
+}
+
+/// The low-level ICMsg transport.
+pub struct Receiver<const ALIGN: usize>
+where
+    elain::Align<ALIGN>: elain::Alignment,
+{
+    recv_region: *mut SharedMemoryRegionHeader<ALIGN>,
+
+    // size of the data field, not including the header. must be a multiple of 4
+    recv_buffer_len: u32,
+
+    // local copies to prevent the other side from interfering
+    recv_rd_idx: u32,
+}
+
+impl<const ALIGN: usize> Receiver<ALIGN>
+where
+    elain::Align<ALIGN>: elain::Alignment,
+{
+    /// Receive a message. On success, returns the size of the message.
+    pub fn try_recv(&mut self, msg: &mut [u8]) -> Result<usize, RecvError> {
+        // TODO invalidate dcache
+        let wr_idx = unsafe { (*self.recv_region).wr_idx.value.load(Ordering::Acquire) };
+        let mut rd_idx = self.recv_rd_idx;
+        if wr_idx == rd_idx {
+            return Err(RecvError::Empty);
+        }
+
+        unsafe {
+            let data_ptr = self
+                .recv_region
+                .cast::<u8>()
+                .add(size_of::<SharedMemoryRegionHeader<ALIGN>>());
+            // Packets are always padded to 4 bytes, and the recv buffer length is a multiple of 4,
+            // therefore it is always valid to read 4 bytes at rd_idx.
+            let header = data_ptr.add(rd_idx as usize).cast::<PacketHeader>().read();
+            rd_idx += 4;
+            if rd_idx >= self.recv_buffer_len {
+                rd_idx = 0;
+            }
+
+            let msg_len = header.len.value() as usize;
+            if msg_len > msg.len() {
+                return Err(RecvError::MessageTooBig);
+            }
+            if msg_len as u32 > self.recv_buffer_len {
+                return Err(RecvError::InvalidMessage);
+            }
+
+            let tail_size = (self.recv_buffer_len - rd_idx) as usize;
+            if msg_len > tail_size {
+                let (p1, p2) = msg[..msg_len].split_at_mut(tail_size);
+                data_ptr
+                    .add(rd_idx as usize)
+                    .copy_to_nonoverlapping(p1.as_mut_ptr(), p1.len());
+                data_ptr.copy_to_nonoverlapping(p2.as_mut_ptr(), p2.len());
+            } else {
+                data_ptr
+                    .add(rd_idx as usize)
+                    .copy_to_nonoverlapping(msg.as_mut_ptr(), msg_len);
+            }
+
+            let padded_msg_len = msg_len + (4 - msg_len % 4) % 4;
+            rd_idx += padded_msg_len as u32;
+            if rd_idx >= self.recv_buffer_len {
+                rd_idx -= self.recv_buffer_len;
+            }
+            self.recv_rd_idx = rd_idx;
+            (*self.recv_region)
+                .rd_idx
+                .value
+                .store(rd_idx, Ordering::Release);
+            Ok(msg_len)
+        }
+    }
+}
+
+/// The sending half of the low-level ICMsg transport.
+pub struct Sender<M, const ALIGN: usize>
+where
+    M: Notifier,
+    elain::Align<ALIGN>: elain::Alignment,
+{
+    send_region: *mut SharedMemoryRegionHeader<ALIGN>,
+
+    // size of the data field, not including the header. must be a multiple of 4
+    send_buffer_len: u32,
+    mbox: M,
+
+    // local copies to prevent the other side from interfering
+    send_wr_idx: u32,
+}
+
+impl<M, const ALIGN: usize> Sender<M, ALIGN>
+where
+    M: Notifier,
+    elain::Align<ALIGN>: elain::Alignment,
+{
     /// Send a message.
     pub fn send(&mut self, msg: &[u8]) -> Result<(), SendError> {
         let mut wr_idx = self.send_wr_idx;
@@ -140,61 +248,9 @@ where
         }
     }
 
-    /// Receive a message. On success, returns the size of the message.
-    pub fn try_recv(&mut self, msg: &mut [u8]) -> Result<usize, RecvError> {
-        // TODO invalidate dcache
-        let wr_idx = unsafe { (*self.recv_region).wr_idx.value.load(Ordering::Acquire) };
-        let mut rd_idx = self.recv_rd_idx;
-        if wr_idx == rd_idx {
-            return Err(RecvError::Empty);
-        }
-
-        unsafe {
-            let data_ptr = self
-                .recv_region
-                .cast::<u8>()
-                .add(size_of::<SharedMemoryRegionHeader<ALIGN>>());
-            // Packets are always padded to 4 bytes, and the recv buffer length is a multiple of 4,
-            // therefore it is always valid to read 4 bytes at rd_idx.
-            let header = data_ptr.add(rd_idx as usize).cast::<PacketHeader>().read();
-            rd_idx += 4;
-            if rd_idx >= self.recv_buffer_len {
-                rd_idx = 0;
-            }
-
-            let msg_len = header.len.value() as usize;
-            if msg_len > msg.len() {
-                return Err(RecvError::MessageTooBig);
-            }
-            if msg_len as u32 > self.recv_buffer_len {
-                return Err(RecvError::InvalidMessage);
-            }
-
-            let tail_size = (self.recv_buffer_len - rd_idx) as usize;
-            if msg_len > tail_size {
-                let (p1, p2) = msg[..msg_len].split_at_mut(tail_size);
-                data_ptr
-                    .add(rd_idx as usize)
-                    .copy_to_nonoverlapping(p1.as_mut_ptr(), p1.len());
-                data_ptr.copy_to_nonoverlapping(p2.as_mut_ptr(), p2.len());
-            } else {
-                data_ptr
-                    .add(rd_idx as usize)
-                    .copy_to_nonoverlapping(msg.as_mut_ptr(), msg_len);
-            }
-
-            let padded_msg_len = msg_len + (4 - msg_len % 4) % 4;
-            rd_idx += padded_msg_len as u32;
-            if rd_idx >= self.recv_buffer_len {
-                rd_idx -= self.recv_buffer_len;
-            }
-            self.recv_rd_idx = rd_idx;
-            (*self.recv_region)
-                .rd_idx
-                .value
-                .store(rd_idx, Ordering::Release);
-            Ok(msg_len)
-        }
+    /// Notify the other end.
+    pub fn notify(&mut self) {
+        self.mbox.notify()
     }
 }
 
