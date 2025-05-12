@@ -4,6 +4,10 @@ version = "0.0.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Rust implementation of the ICMsg IPC backend"
+keywords = ["embedded", "async", "ipc"]
+categories = ["embedded", "no-std::no-alloc", "asynchronous"]
+repository = "https://github.com/0e4ef622/icmsg-rs"
+exclude = ["/examples"]
 
 [dependencies]
 elain = "0.3.1"
