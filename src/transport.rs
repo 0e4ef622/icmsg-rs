@@ -87,7 +87,7 @@ where
     }
 }
 
-/// The low-level ICMsg transport.
+/// The receiving half of the low-level ICMsg transport.
 pub struct Receiver<const ALIGN: usize>
 where
     elain::Align<ALIGN>: elain::Alignment,
