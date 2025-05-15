@@ -9,7 +9,7 @@ set(APP_CORE_HEX_NAME app-core.hex)
 # Build the net core
 set(BOARD nrf5340dk/nrf5340/cpunet)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
-set_property(GLOBAL APPEND PROPERTY HEX_FILES_TO_MERGE ../${APP_CORE_HEX_NAME})
+set_property(GLOBAL APPEND PROPERTY HEX_FILES_TO_MERGE ../${APP_CORE_HEX_NAME} zephyr.hex)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(ipc_service_remote)
