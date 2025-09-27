@@ -1,6 +1,10 @@
 #![no_std]
 #![no_main]
-use bt_hci::WriteHci;
+#![recursion_limit = "256"]
+
+mod cmd_dispatch;
+
+use bt_hci::{FromHciBytes, HostToControllerPacket, PacketKind, WriteHci, cmd::{self, AsyncCmd, Cmd, Opcode, OpcodeGroup}, param};
 use defmt::unwrap;
 use embassy_executor::Spawner;
 use embassy_nrf::{config::Config, ipc::{self, Ipc, IpcChannel}, mode::Async, peripherals::{self, RNG}, rng::{self, Rng}};
@@ -9,6 +13,8 @@ use icmsg::{IcMsg, Notifier, WaitForNotify};
 use nrf_sdc::{self as sdc, mpsl};
 use sdc::mpsl::MultiprotocolServiceLayer;
 use static_cell::StaticCell;
+use crate::{cmd_dispatch::exec_cmd_by_opcode, icmsg_config::ALIGN};
+
 use {
     defmt_rtt as _,
     panic_probe as _,
@@ -134,22 +140,58 @@ async fn main(spawner: Spawner) {
     }
 }
 
+type CmdErr = cmd::Error<sdc::Error>;
+
+fn parse_cmd_after_h4(rest: &[u8]) -> Result<(Opcode, &[u8]), CmdErr> {
+    if rest.len() < 3 {
+        return Err(cmd::Error::Hci(param::Error::INVALID_HCI_PARAMETERS));
+    }
+    let raw  = u16::from_le_bytes([rest[0], rest[1]]);
+    let ogf  = OpcodeGroup::new(((raw >> 10) & 0x3F) as u8);
+    let ocf  = raw & 0x03FF;
+    let plen = rest[2] as usize;
+    if 3 + plen > rest.len() {
+        return Err(cmd::Error::Hci(param::Error::INVALID_HCI_PARAMETERS));
+    }
+    Ok((Opcode::new(ogf, ocf), &rest[3..3 + plen]))
+}
+
+macro_rules! hci { ($e:expr) => { $e.map_err(|_| cmd::Error::Hci(param::Error::INVALID_HCI_PARAMETERS)) }; }
+macro_rules! io  { ($e:expr) => { $e.map_err(cmd::Error::Io) }; }
+
+async fn exec_h4_to_sdc(
+    sdc: &sdc::SoftdeviceController<'static>,
+    pkt: &[u8],
+) -> Result<(), CmdErr> {
+    let (kind, rest) = hci!(bt_hci::PacketKind::from_hci_bytes(pkt))?;
+    match kind {
+        bt_hci::PacketKind::Cmd => {
+            let (opcode, payload) = parse_cmd_after_h4(rest)?;
+            exec_cmd_by_opcode::<sdc::Error>(sdc, opcode, payload).await
+        }
+        bt_hci::PacketKind::AclData => io!(sdc.hci_data_put(rest)),
+        bt_hci::PacketKind::IsoData => io!(sdc.hci_iso_data_put(rest)),
+        bt_hci::PacketKind::SyncData => Err(cmd::Error::Hci(param::Error::UNSUPPORTED)), // SCO not in SDC
+        bt_hci::PacketKind::Event    => Err(cmd::Error::Hci(param::Error::UNSPECIFIED)), // wrong direction here
+    }
+}
+
 #[embassy_executor::task]
 async fn receive_task(
-    mut recv: icmsg::Receiver<IpcWait<'static>, { icmsg_config::ALIGN }>,
+    mut recv: icmsg::Receiver<IpcWait<'static>, ALIGN>,
     sdc: &'static sdc::SoftdeviceController<'static>,
 ) {
-    let mut buf = [0; 256];
+    let mut buf = [0u8; 256];
     loop {
         let n = match recv.recv(&mut buf).await {
             Ok(n) => n,
-            Err(e) => {
-                defmt::info!("Recv error: {:?}", e);
-                return;
-            }
+            Err(e) => { defmt::info!("Recv error: {:?}", e); return; }
         };
-        defmt::info!("Received {} bytes: {:x}", n, &buf[..n]);
-        unwrap!(sdc.hci_data_put(&buf[..n]));
+        defmt::info!("Received {} bytes: {=[u8]:x}", n, &buf[..n]);
+
+        if let Err(e) = exec_h4_to_sdc(sdc, &buf[..n]).await {
+            defmt::warn!("TX->SDC error: {:?}", e);
+        }
     }
 }
 
