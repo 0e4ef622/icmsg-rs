@@ -1,0 +1,20 @@
+[package]
+name = "net-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+defmt-rtt = "1.0.0"
+embassy-executor = { version = "0.9.1", features = ["defmt", "arch-cortex-m", "executor-thread"] }
+embassy-nrf = { version = "0.7.0", features = ["defmt", "time-driver-rtc1", "gpiote", "time", "unstable-pac"] }
+embassy-time = { version = "0.5.0", features = ["defmt"] }
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", features = ["defmt", "nrf5340-net", "peripheral"] }
+
+cortex-m-rt = "0.7.5"
+cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
+panic-probe = { version = "1", features = ["print-rtt"] }
+icmsg = { path = "../../.." }
+static_cell = "2.1.1"
+defmt = "1.0.1"
+bt-hci = { version = "0.6.0", features = ["defmt"] }
+embassy-sync = { version = "0.7.2", features = ["defmt"] }
