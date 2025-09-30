@@ -1,9 +1,13 @@
 #![no_std]
 #![no_main]
+
+mod init;
+
 use bt_hci::{controller::ExternalController, transport::SerialTransport};
+use defmt::Debug2Format;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
-use embassy_nrf::{config::Config, ipc::{self, Ipc, IpcChannel}, peripherals};
+use embassy_nrf::{ipc::{self, Ipc, IpcChannel}, peripherals};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::{Delay, Duration, Timer};
 use icmsg::{IcMsg, Notifier, WaitForNotify};
@@ -46,17 +50,16 @@ mod icmsg_config {
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let config = Config::default();
-    let p = embassy_nrf::init(config);
+    let (_core_peripherals, p) = init::init();
 
     defmt::info!("Hello, world!");
 
     let mut ipc = Ipc::new(p.IPC, Irqs);
-    ipc.event0.configure_trigger([IpcChannel::Channel0]);
-    ipc.event0.configure_wait([IpcChannel::Channel1]);
+    ipc.event0.configure_trigger([IpcChannel::Channel1]);
+    ipc.event0.configure_wait([IpcChannel::Channel0]);
 
     let icmsg_config = icmsg_config::get_icmsg_config();
-    defmt::info!("{:?}", icmsg_config);
+    defmt::info!("{:?}", Debug2Format(&icmsg_config));
     let icmsg = unsafe {
         IcMsg::<_, _, { icmsg_config::ALIGN }>::init(
             icmsg_config::get_icmsg_config(),
@@ -67,7 +70,7 @@ async fn main(_spawner: Spawner) {
     };
     let icmsg = match icmsg {
         Err(e) => {
-            defmt::info!("error: {:?}", e);
+            defmt::error!("error: {:?}", Debug2Format(&e));
             return;
         }
         Ok(icmsg) => {

@@ -6,5 +6,5 @@ runner = "probe-rs run --chip nRF5340_xxAA"
 target = "thumbv8m.main-none-eabi"
 rustflags = "-C target-cpu=cortex-m33"
 
-# [patch.crates-io]
-# bt-hci = { path = "../../../../../forks/bt-hci" }
+[patch.crates-io]
+bt-hci = { path = "../../../../../forks/bt-hci" }

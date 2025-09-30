@@ -22,3 +22,6 @@ trouble-host = { git = "https://github.com/embassy-rs/trouble.git", features = [
 
 [profile.release]
 debug = 2
+lto = "fat"
+opt-level = "z"
+codegen-units = 1

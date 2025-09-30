@@ -18,3 +18,9 @@ static_cell = "2.1.1"
 defmt = "1.0.1"
 bt-hci = { version = "0.6.0", features = ["defmt"] }
 embassy-sync = { version = "0.7.2", features = ["defmt"] }
+
+[profile.release]
+debug = 2
+lto = "fat"
+opt-level = "z"
+codegen-units = 1

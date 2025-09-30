@@ -10,7 +10,7 @@ use crate::{cmd_dispatch::exec_cmd_by_opcode, icmsg_config::ALIGN};
 use bt_hci::{
     FromHciBytes, WriteHci, cmd::{self, Opcode, OpcodeGroup}, param,
 };
-use defmt::unwrap;
+use defmt::{Debug2Format, unwrap};
 use embassy_executor::Spawner;
 use embassy_nrf::{
     config::Config,
@@ -91,7 +91,7 @@ async fn main(spawner: Spawner) {
     ipc.event0.configure_wait([IpcChannel::Channel1]);
 
     let icmsg_config = icmsg_config::get_icmsg_config();
-    defmt::info!("{:?}", icmsg_config);
+    defmt::info!("{:?}", Debug2Format(&icmsg_config));
     let icmsg = unsafe {
         IcMsg::<_, _, { icmsg_config::ALIGN }>::init(
             icmsg_config::get_icmsg_config(),
@@ -105,7 +105,7 @@ async fn main(spawner: Spawner) {
     };
     let icmsg = match icmsg {
         Err(e) => {
-            defmt::info!("error: {:?}", e);
+            defmt::error!("error: {:?}", Debug2Format(&e));
             return;
         }
         Ok(icmsg) => {
@@ -214,7 +214,7 @@ async fn receive_task(
         let n = match recv.recv(&mut buf).await {
             Ok(n) => n,
             Err(e) => {
-                defmt::info!("Recv error: {:?}", e);
+                defmt::error!("Recv error: {:?}", defmt::Debug2Format(&e));
                 return;
             }
         };
