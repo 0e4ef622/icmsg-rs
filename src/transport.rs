@@ -263,6 +263,15 @@ pub enum SendError {
     InvalidState,
 }
 
+impl embedded_io_async::Error for SendError {
+    fn kind(&self) -> embedded_io_async::ErrorKind {
+        match &self {
+            Self::InsufficientCapacity => embedded_io_async::ErrorKind::OutOfMemory,
+            Self::InvalidState => embedded_io_async::ErrorKind::InvalidData,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RecvError {
     /// The message was bigger than the provided buffer.
@@ -272,6 +281,16 @@ pub enum RecvError {
     /// An invalid message was received. e.g. a packet with a length greater than the shared memory
     /// memory region. This is a fatal error, likely caused by a bug in the channel implementation.
     InvalidMessage,
+}
+
+impl embedded_io_async::Error for RecvError {
+    fn kind(&self) -> embedded_io_async::ErrorKind {
+        match &self {
+            Self::MessageTooBig => embedded_io_async::ErrorKind::OutOfMemory,
+            Self::Empty => embedded_io_async::ErrorKind::TimedOut,
+            Self::InvalidMessage => embedded_io_async::ErrorKind::InvalidData,
+        }
+    }
 }
 
 #[repr(C)]
