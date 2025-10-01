@@ -17,9 +17,15 @@ struct Stash {
 }
 impl Stash {
     const fn new() -> Self {
-        Self { buf: [0; STASH_MAX], head: 0, tail: 0 }
+        Self {
+            buf: [0; STASH_MAX],
+            head: 0,
+            tail: 0,
+        }
     }
-    fn available(&self) -> usize { self.tail.saturating_sub(self.head) }
+    fn available(&self) -> usize {
+        self.tail.saturating_sub(self.head)
+    }
     fn take_into(&mut self, out: &mut [u8]) -> usize {
         let n = core::cmp::min(out.len(), self.available());
         out[..n].copy_from_slice(&self.buf[self.head..self.head + n]);
@@ -36,7 +42,7 @@ impl Stash {
 pub struct MyTransport<M: RawMutex, R, W> {
     reader: Mutex<M, R>,
     writer: Mutex<M, W>,
-    stash:  Mutex<M, Stash>,
+    stash: Mutex<M, Stash>,
 }
 
 impl<M: RawMutex, R: embedded_io_async::Read, W: embedded_io_async::Write> MyTransport<M, R, W> {
@@ -44,17 +50,17 @@ impl<M: RawMutex, R: embedded_io_async::Read, W: embedded_io_async::Write> MyTra
         Self {
             reader: Mutex::new(reader),
             writer: Mutex::new(writer),
-            stash:  Mutex::new(Stash::new()),
+            stash: Mutex::new(Stash::new()),
         }
     }
 }
 
 impl<
-        M: RawMutex,
-        R: embedded_io::ErrorType<Error = E>,
-        W: embedded_io::ErrorType<Error = E>,
-        E: embedded_io::Error,
-    > ErrorType for MyTransport<M, R, W>
+    M: RawMutex,
+    R: embedded_io::ErrorType<Error = E>,
+    W: embedded_io::ErrorType<Error = E>,
+    E: embedded_io::Error,
+> ErrorType for MyTransport<M, R, W>
 {
     type Error = bt_hci::transport::Error<E>;
 }
@@ -83,16 +89,19 @@ impl<'a, R: embedded_io_async::Read> embedded_io_async::Read for StashReaderAsyn
 }
 
 impl<
-        M: RawMutex,
-        R: embedded_io_async::Read<Error = E>,
-        W: embedded_io_async::Write<Error = E>,
-        E: embedded_io::Error,
-    > bt_hci::transport::Transport for MyTransport<M, R, W>
+    M: RawMutex,
+    R: embedded_io_async::Read<Error = E>,
+    W: embedded_io_async::Write<Error = E>,
+    E: embedded_io::Error,
+> bt_hci::transport::Transport for MyTransport<M, R, W>
 {
     async fn read<'a>(&self, rx: &'a mut [u8]) -> Result<ControllerToHostPacket<'a>, Self::Error> {
         let mut r = self.reader.lock().await;
         let mut s = self.stash.lock().await;
-        let mut adapter = StashReaderAsync { stash: &mut *s, inner: &mut *r };
+        let mut adapter = StashReaderAsync {
+            stash: &mut *s,
+            inner: &mut *r,
+        };
 
         ControllerToHostPacket::read_hci_async(&mut adapter, rx)
             .await
@@ -134,16 +143,22 @@ impl<'a, R: embedded_io::Read> embedded_io::Read for StashReaderBlocking<'a, R> 
 }
 
 impl<
-        M: RawMutex,
-        R: embedded_io::Read<Error = E>,
-        W: embedded_io::Write<Error = E>,
-        E: embedded_io::Error,
-    > bt_hci::transport::blocking::Transport for MyTransport<M, R, W>
+    M: RawMutex,
+    R: embedded_io::Read<Error = E>,
+    W: embedded_io::Write<Error = E>,
+    E: embedded_io::Error,
+> bt_hci::transport::blocking::Transport for MyTransport<M, R, W>
 {
-    fn read<'a>(&self, rx: &'a mut [u8]) -> Result<ControllerToHostPacket<'a>, TryError<Self::Error>> {
+    fn read<'a>(
+        &self,
+        rx: &'a mut [u8],
+    ) -> Result<ControllerToHostPacket<'a>, TryError<Self::Error>> {
         let mut r = self.reader.try_lock().map_err(|_| TryError::Busy)?;
         let mut s = self.stash.try_lock().map_err(|_| TryError::Busy)?;
-        let mut adapter = StashReaderBlocking { stash: &mut *s, inner: &mut *r };
+        let mut adapter = StashReaderBlocking {
+            stash: &mut *s,
+            inner: &mut *r,
+        };
 
         ControllerToHostPacket::read_hci(&mut adapter, rx)
             .map_err(bt_hci::transport::Error::Read)
