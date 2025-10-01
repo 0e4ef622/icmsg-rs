@@ -266,8 +266,8 @@ pub enum SendError {
 impl embedded_io_async::Error for SendError {
     fn kind(&self) -> embedded_io_async::ErrorKind {
         match &self {
-            Self::InsufficientCapacity => embedded_io_async::ErrorKind::OutOfMemory,
-            Self::InvalidState => embedded_io_async::ErrorKind::InvalidData,
+            Self::InsufficientCapacity => embedded_io_async::ErrorKind::WriteZero,
+            Self::InvalidState => embedded_io_async::ErrorKind::Other,
         }
     }
 }
@@ -287,8 +287,8 @@ impl embedded_io_async::Error for RecvError {
     fn kind(&self) -> embedded_io_async::ErrorKind {
         match &self {
             Self::MessageTooBig => embedded_io_async::ErrorKind::OutOfMemory,
-            Self::Empty => embedded_io_async::ErrorKind::TimedOut,
-            Self::InvalidMessage => embedded_io_async::ErrorKind::InvalidData,
+            Self::Empty => embedded_io_async::ErrorKind::Interrupted,
+            Self::InvalidMessage => embedded_io_async::ErrorKind::Other,
         }
     }
 }
