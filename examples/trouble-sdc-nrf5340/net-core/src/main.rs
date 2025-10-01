@@ -139,8 +139,8 @@ async fn main(spawner: Spawner) {
     static RNG_CELL: StaticCell<Rng<RNG, Async>> = StaticCell::new();
     let rng = RNG_CELL.init(Rng::new(p.RNG, Irqs));
 
-    static SDC_MEM: StaticCell<sdc::Mem<1648>> = StaticCell::new();
-    let sdc_mem = SDC_MEM.init(sdc::Mem::<1648>::new());
+    static SDC_MEM: StaticCell<sdc::Mem<1120>> = StaticCell::new();
+    let sdc_mem = SDC_MEM.init(sdc::Mem::<1120>::new());
     static SDC_CELL: StaticCell<sdc::SoftdeviceController> = StaticCell::new();
     let sdc = SDC_CELL.init(unwrap!(build_sdc(sdc_p, rng, mpsl, sdc_mem)));
 
@@ -150,7 +150,7 @@ async fn main(spawner: Spawner) {
 	let send = SEND.init(Mutex::new(RefCell::new(send)));
     spawner.must_spawn(receive_task(send, recv, sdc));
 
-    let mut buf = [0; 256];
+    let mut buf = [0; nrf_sdc::raw::HCI_MSG_BUFFER_MAX_SIZE as usize + 1];
     loop {
         let packet = unwrap!(sdc.hci_get(&mut buf[1..]).await);
         unwrap!(packet.write_hci_async(&mut buf[..]).await);
@@ -209,7 +209,7 @@ async fn receive_task(
     mut recv: icmsg::Receiver<IpcWait<'static>, ALIGN>,
     sdc: &'static sdc::SoftdeviceController<'static>,
 ) {
-    let mut buf = [0u8; 256];
+    let mut buf = [0; nrf_sdc::raw::HCI_MSG_BUFFER_MAX_SIZE as usize];
     loop {
         let n = match recv.recv(&mut buf).await {
             Ok(n) => n,

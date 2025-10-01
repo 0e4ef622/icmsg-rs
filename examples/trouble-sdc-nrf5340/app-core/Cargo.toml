@@ -12,13 +12,15 @@ embassy-futures = { version = "0.1.2", features = ["defmt"] }
 
 cortex-m-rt = "0.7.5"
 cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
-panic-probe = { version = "1", features = ["print-rtt"] }
-icmsg = { path = "../../.." }
+panic-probe = { version = "1", features = ["defmt", "print-defmt"] }
+icmsg = { path = "../../..", features = ["defmt"] }
 static_cell = "2.1.1"
 defmt = "1.0.1"
 bt-hci = { version = "0.6.0", features = ["defmt"] }
 embassy-sync = { version = "0.7.2", features = ["defmt"] }
-trouble-host = { git = "https://github.com/embassy-rs/trouble.git", features = ["defmt", "peripheral", "controller-host-flow-control"] }
+trouble-host = { git = "https://github.com/embassy-rs/trouble.git", features = ["defmt", "peripheral", "security", "dev-disable-csprng-seed-requirement"] }
+embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
+embedded-io = { version = "0.6.1", features = ["defmt-03"] }
 
 [profile.release]
 debug = 2

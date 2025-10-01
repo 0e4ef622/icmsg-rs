@@ -14,12 +14,14 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
+    let memory_x_bytes = include_bytes!("memory.x");
+
     // Put `memory.x` in our output directory and ensure it's
     // on the linker search path.
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
     File::create(out.join("memory.x"))
         .unwrap()
-        .write_all(include_bytes!("memory.x"))
+        .write_all(memory_x_bytes)
         .unwrap();
     println!("cargo:rustc-link-search={}", out.display());
 
@@ -27,7 +29,8 @@ fn main() {
     // any file in the project changes. By specifying `memory.x`
     // here, we ensure the build script is only re-run when
     // `memory.x` is changed.
-    println!("cargo:rerun-if-changed=memory.x");
+    println!("cargo:rerun-if-changed=memory-app.x");
+    println!("cargo:rerun-if-changed=memory-net.x");
 
     println!("cargo:rustc-link-arg-bins=--nmagic");
     println!("cargo:rustc-link-arg-bins=-Tlink.x");

@@ -49,8 +49,8 @@ macro_rules! dispatch_cmd {
 
         // Sizes/constants
         const RLEN: usize = < $ty as bt_hci::cmd::SyncCmd >::ReturnBuf::LEN;
-        const HEAD: usize = 6; // 1 pkt kind + 1 event kind + 1 len + 1 num_pkts + 2 opcode + 1 status
-        let param_len: u8 = (1 + 2 + RLEN) as u8;
+        const HEAD: usize = 7; // 1 pkt + 1 event + 1 len + 1 num + 2 opcode + 1 status
+        let param_len: u8 = (1 + 2 + 1 + RLEN) as u8;
 
         // Allocate full controller->host event buffer on the stack.
         let mut buf = [0u8; HEAD + RLEN];
@@ -89,6 +89,7 @@ macro_rules! dispatch_cmd {
             }
         }
 
+        defmt::info!("Sending {} bytes: {=[u8]:x}", buf.len(), &buf[..]);
         $sender.lock(|x| x.borrow_mut().send(&buf)).map_err(|_| bt_hci::cmd::Error::Io(nrf_sdc::Error::EIO))
     }};
 

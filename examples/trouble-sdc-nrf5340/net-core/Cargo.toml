@@ -12,7 +12,7 @@ nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", features = ["defmt"
 
 cortex-m-rt = "0.7.5"
 cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
-panic-probe = { version = "1", features = ["print-rtt"] }
+panic-probe = { version = "1", features = ["defmt", "print-defmt"] }
 icmsg = { path = "../../.." }
 static_cell = "2.1.1"
 defmt = "1.0.1"

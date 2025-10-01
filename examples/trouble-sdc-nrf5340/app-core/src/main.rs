@@ -2,8 +2,10 @@
 #![no_main]
 
 mod init;
+mod fake_rng;
+mod transport;
 
-use bt_hci::{controller::ExternalController, transport::SerialTransport};
+use bt_hci::controller::ExternalController;
 use defmt::Debug2Format;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
@@ -11,7 +13,9 @@ use embassy_nrf::{ipc::{self, Ipc, IpcChannel}, peripherals};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::{Delay, Duration, Timer};
 use icmsg::{IcMsg, Notifier, WaitForNotify};
-use trouble_host::{Host, HostResources, Stack, prelude::{AdStructure, Advertisement, AdvertisementParameters, BR_EDR_NOT_SUPPORTED, DefaultPacketPool, LE_GENERAL_DISCOVERABLE}};
+use trouble_host::{Address, Host, HostResources, Stack, prelude::{AdStructure, Advertisement, AdvertisementParameters, BR_EDR_NOT_SUPPORTED, DefaultPacketPool, LE_GENERAL_DISCOVERABLE}};
+use crate::transport::MyTransport;
+
 use {
     defmt_rtt as _,
     panic_probe as _,
@@ -48,11 +52,66 @@ mod icmsg_config {
     }
 }
 
+/// Configure SPU so the network core can access the ICMSG {RX,TX} regions.
+/// - `extdomain_idx`: which EXTDOMAIN slot to configure (often 0 for the net core).
+///
+/// Safety: touches SPU_S registers and trusts linker-provided symbol layout.
+pub unsafe fn grant_spu(extdomain_idx: Option<usize>) {
+    use embassy_nrf::pac::spu::vals;
+
+    unsafe extern "C" {
+        static __icmsg_tx_start: u32;
+        static __icmsg_tx_end: u32;
+        static __icmsg_rx_start: u32;
+        static __icmsg_rx_end: u32;
+    }
+
+    const RAM_BASE: u32 = 0x2000_0000;
+    const REGION_SIZE: u32 = 8 * 1024; // 8 KiB per SPU RAM region (nRF53)
+    #[inline]
+    fn to_region_index(addr: u32) -> u32 {
+        (addr.saturating_sub(RAM_BASE)) / REGION_SIZE
+    }
+
+    let tx_start = (&raw const __icmsg_tx_start) as u32;
+    let tx_end   = (&raw const __icmsg_tx_end)   as u32;
+    let rx_start = (&raw const __icmsg_rx_start) as u32;
+    let rx_end   = (&raw const __icmsg_rx_end)   as u32;
+
+    let tx_first = to_region_index(tx_start);
+    let tx_last  = to_region_index(tx_end.saturating_sub(1));
+    let rx_first = to_region_index(rx_start);
+    let rx_last  = to_region_index(rx_end.saturating_sub(1));
+
+    let spu = embassy_nrf::pac::SPU_S;
+    let configure_range = |first: u32, last: u32| {
+        for i in first..=last {
+            spu.ramregion(i as usize).perm().write(|w| {
+                w.set_read(true);
+                w.set_write(true);
+                w.set_execute(true);
+                w.set_secattr(false);
+            });
+        }
+    };
+
+    configure_range(tx_first, tx_last);
+    configure_range(rx_first, rx_last);
+
+    if let Some(idx) = extdomain_idx {
+        spu.extdomain(idx).perm().write(|w| {
+            w.set_securemapping(vals::ExtdomainPermSecuremapping::NON_SECURE);
+        });
+    }
+}
+
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let (_core_peripherals, p) = init::init();
 
     defmt::info!("Hello, world!");
+    
+    unsafe { grant_spu(Some(0)); }
 
     let mut ipc = Ipc::new(p.IPC, Irqs);
     ipc.event0.configure_trigger([IpcChannel::Channel1]);
@@ -83,10 +142,15 @@ async fn main(_spawner: Spawner) {
     
     let (send, recv) = icmsg.split();
 
-    let driver: SerialTransport<NoopRawMutex, _, _> = SerialTransport::new(recv, send);
+    let driver: MyTransport<NoopRawMutex, _, _> = MyTransport::new(recv, send);
     let controller: ExternalController<_, 10> = ExternalController::new(driver);
+    
+    // Using a fixed "random" address can be useful for testing. In real scenarios, one would
+    // use e.g. the MAC 6 byte array as the address (how to get that varies by the platform).
+    let address: Address = Address::random([0xff, 0x8f, 0x19, 0x05, 0xe4, 0xff]);
+    defmt::info!("Our address = {}", address);
 
-    let stack: Stack<'_, _, _> = trouble_host::new(controller, &mut resources);
+    let stack: Stack<'_, _, _> = trouble_host::new(controller, &mut resources).set_random_address(address);
     let Host {
         mut peripheral,
         mut runner,
@@ -113,8 +177,8 @@ async fn main(_spawner: Spawner) {
                 .advertise(
                     &params,
                     Advertisement::NonconnectableScannableUndirected {
-                        adv_data: &adv_data[..len],
-                        scan_data: &[],
+                        adv_data: &[],
+                        scan_data: &adv_data[..len],
                     },
                 )
                 .await
