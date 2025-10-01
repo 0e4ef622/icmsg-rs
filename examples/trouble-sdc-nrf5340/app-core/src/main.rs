@@ -67,6 +67,8 @@ pub unsafe fn grant_spu(extdomain_idx: Option<usize>) {
     use embassy_nrf::pac::spu::vals;
 
     unsafe extern "C" {
+        static __ram_start: u32;
+        static __ram_size: u32;
         static __icmsg_tx_start: u32;
         static __icmsg_tx_end: u32;
         static __icmsg_rx_start: u32;
@@ -92,7 +94,7 @@ pub unsafe fn grant_spu(extdomain_idx: Option<usize>) {
 
     let spu = embassy_nrf::pac::SPU_S;
     let configure_range = |first: u32, last: u32| {
-        for i in first..=last {
+        for i in first..last+1 {
             spu.ramregion(i as usize).perm().write(|w| {
                 w.set_read(true);
                 w.set_write(true);
