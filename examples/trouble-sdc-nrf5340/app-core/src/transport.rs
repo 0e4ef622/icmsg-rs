@@ -1,5 +1,7 @@
 //! HCI transport layers [📖](https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Core-54/out/en/host-controller-interface.html)
 
+use core::mem::MaybeUninit;
+
 use bt_hci::transport::WithIndicator;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::mutex::Mutex;
@@ -7,6 +9,8 @@ use embedded_io::ErrorType;
 
 use bt_hci::controller::blocking::TryError;
 use bt_hci::{ControllerToHostPacket, HostToControllerPacket, ReadHci, WriteHci};
+
+use crate::uninit_write_buf::UninitWriteBuf;
 
 const STASH_MAX: usize = 512;
 
@@ -109,10 +113,18 @@ impl<
     }
 
     async fn write<T: HostToControllerPacket>(&self, tx: &T) -> Result<(), Self::Error> {
-        let mut buf = [0u8; 512];
-        defmt::unwrap!(WithIndicator::new(tx).write_hci_async(&mut buf[..]).await);
+        let needed = tx.size() + 1;
+        assert!(needed <= STASH_MAX);
+
+        let mut storage: [MaybeUninit<u8>; STASH_MAX] = [const { MaybeUninit::uninit() }; 512];
+        let mut sink = UninitWriteBuf::new(&mut storage[..needed]);
+
+        defmt::unwrap!(WithIndicator::new(tx).write_hci_async(&mut sink).await);
+
+        let buf = sink.as_init();
+
         let mut w = self.writer.lock().await;
-        w.write(&buf[..tx.size() + 1])
+        w.write(buf)
             .await
             .map(|_| ())
             .map_err(bt_hci::transport::Error::Write)
@@ -166,10 +178,18 @@ impl<
     }
 
     fn write<T: HostToControllerPacket>(&self, tx: &T) -> Result<(), TryError<Self::Error>> {
-        let mut buf = [0u8; 512];
-        defmt::unwrap!(WithIndicator::new(tx).write_hci(&mut buf[..]));
+        let needed = tx.size() + 1;
+        assert!(needed <= STASH_MAX);
+
+        let mut storage: [MaybeUninit<u8>; STASH_MAX] = [const { MaybeUninit::uninit() }; 512];
+        let mut sink = UninitWriteBuf::new(&mut storage[..needed]);
+
+        defmt::unwrap!(WithIndicator::new(tx).write_hci(&mut sink));
+
+        let buf = sink.as_init();
+
         let mut w = self.writer.try_lock().map_err(|_| TryError::Busy)?;
-        w.write(&buf[..tx.size() + 1])
+        w.write(buf)
             .map(|_| ())
             .map_err(bt_hci::transport::Error::Write)
             .map_err(TryError::Error)

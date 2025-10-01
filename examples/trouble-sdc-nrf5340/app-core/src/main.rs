@@ -4,6 +4,7 @@
 mod fake_rng;
 mod init;
 mod transport;
+mod uninit_write_buf;
 
 use crate::transport::MyTransport;
 use bt_hci::controller::ExternalController;
