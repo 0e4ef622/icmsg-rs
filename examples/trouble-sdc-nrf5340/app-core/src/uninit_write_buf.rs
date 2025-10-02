@@ -13,14 +13,20 @@ impl<'a> UninitWriteBuf<'a> {
         Self { raw, pos: 0 }
     }
 
-    pub fn _len(&self) -> usize { self.pos }
-    pub fn capacity(&self) -> usize { self.raw.len() }
-    pub fn remaining(&self) -> usize { self.capacity().saturating_sub(self.pos) }
+    pub fn _len(&self) -> usize {
+        self.pos
+    }
+    pub fn capacity(&self) -> usize {
+        self.raw.len()
+    }
+    pub fn remaining(&self) -> usize {
+        self.capacity().saturating_sub(self.pos)
+    }
 
     fn write_inner(&mut self, src: &[u8]) -> usize {
         let n = cmp::min(self.remaining(), src.len());
         if n != 0 {
-            for (slot, b) in self.raw[self.pos .. self.pos + n].iter_mut().zip(&src[..n]) {
+            for (slot, b) in self.raw[self.pos..self.pos + n].iter_mut().zip(&src[..n]) {
                 slot.write(*b);
             }
             self.pos += n;
@@ -42,12 +48,16 @@ impl<'a> eio::Write for UninitWriteBuf<'a> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         Ok(self.write_inner(buf))
     }
-    fn flush(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 impl<'a> eioa::Write for UninitWriteBuf<'a> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         Ok(self.write_inner(buf))
     }
-    async fn flush(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }

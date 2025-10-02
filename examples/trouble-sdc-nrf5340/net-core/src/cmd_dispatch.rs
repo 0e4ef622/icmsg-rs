@@ -89,7 +89,7 @@ macro_rules! dispatch_cmd {
             }
         }
 
-        defmt::info!("Sending {} bytes: {=[u8]:x}", buf.len(), &buf[..]);
+        defmt::info!("[cmd_dispatch] Sending {} bytes: {=[u8]:x}", buf.len(), &buf[..]);
         $sender.lock(|x| x.borrow_mut().send(&buf)).map_err(|_| bt_hci::cmd::Error::Io(nrf_sdc::Error::EIO))
     }};
 

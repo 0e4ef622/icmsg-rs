@@ -22,6 +22,7 @@ dependencies = [
  "cortex-m-rt",
  "defmt 1.0.1",
  "defmt-rtt",
+ "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
  "embassy-nrf",
@@ -29,8 +30,10 @@ dependencies = [
  "embassy-time",
  "embedded-io",
  "embedded-io-async",
+ "embedded-storage-async",
  "icmsg",
  "panic-probe",
+ "sequential-storage",
  "static_cell",
  "trouble-host",
 ]
@@ -1084,6 +1087,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
+name = "sequential-storage"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0779e7aa11fe1e0a6a0bfb6abcdcc8852c6b74e3946d2ce93d24963dafc4a271"
+dependencies = [
+ "defmt 0.3.100",
+ "embedded-storage-async",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1144,7 +1157,6 @@ dependencies = [
 [[package]]
 name = "trouble-host"
 version = "0.4.0"
-source = "git+https://github.com/embassy-rs/trouble.git#a143dcdd3fd9f4e843eafa3f568c2fa89650687e"
 dependencies = [
  "aes",
  "bt-hci",
@@ -1168,7 +1180,6 @@ dependencies = [
 [[package]]
 name = "trouble-host-macros"
 version = "0.3.0"
-source = "git+https://github.com/embassy-rs/trouble.git#a143dcdd3fd9f4e843eafa3f568c2fa89650687e"
 dependencies = [
  "convert_case",
  "darling",

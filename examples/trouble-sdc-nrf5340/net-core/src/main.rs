@@ -8,7 +8,7 @@ use core::cell::RefCell;
 
 use crate::{cmd_dispatch::exec_cmd_by_opcode, icmsg_config::ALIGN};
 use bt_hci::{
-    FromHciBytes, WriteHci, cmd::{self, Opcode, OpcodeGroup}, param,
+    FromHciBytes, PacketKind, cmd::{self, Opcode, OpcodeGroup}, param
 };
 use defmt::{Debug2Format, unwrap};
 use embassy_executor::Spawner;
@@ -65,13 +65,27 @@ mod icmsg_config {
     }
 }
 
+/// How many outgoing L2CAP buffers per link
+const L2CAP_TXQ: u8 = 3;
+
+/// How many incoming L2CAP buffers per link
+const L2CAP_RXQ: u8 = 3;
+
+/// Size of L2CAP packets
+const L2CAP_MTU: usize = 72;
+
 fn build_sdc<'d, const N: usize>(
     p: nrf_sdc::Peripherals<'d>,
-    rng: &'d mut Rng<RNG, Async>,
+    rng: &'d mut rng::Rng<RNG, Async>,
     mpsl: &'d MultiprotocolServiceLayer,
     mem: &'d mut sdc::Mem<N>,
 ) -> Result<nrf_sdc::SoftdeviceController<'d>, nrf_sdc::Error> {
-    sdc::Builder::new()?.support_adv()?.build(p, rng, mpsl, mem)
+    sdc::Builder::new()?
+        .support_adv()?
+        .support_peripheral()?
+        .peripheral_count(1)?
+        .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
+        .build(p, rng, mpsl, mem)
 }
 
 #[embassy_executor::task]
@@ -85,6 +99,9 @@ async fn main(spawner: Spawner) {
     let p = embassy_nrf::init(config);
 
     defmt::info!("Hello, world!");
+
+    // give myself a second to attach without panic. uncomment for debug
+    // embassy_time::Timer::after_secs(3).await;
 
     let mut ipc = Ipc::new(p.IPC, Irqs);
     ipc.event0.configure_trigger([IpcChannel::Channel0]);
@@ -139,8 +156,8 @@ async fn main(spawner: Spawner) {
     static RNG_CELL: StaticCell<Rng<RNG, Async>> = StaticCell::new();
     let rng = RNG_CELL.init(Rng::new(p.RNG, Irqs));
 
-    static SDC_MEM: StaticCell<sdc::Mem<1120>> = StaticCell::new();
-    let sdc_mem = SDC_MEM.init(sdc::Mem::<1120>::new());
+    static SDC_MEM: StaticCell<sdc::Mem<2472>> = StaticCell::new();
+    let sdc_mem = SDC_MEM.init(sdc::Mem::<2472>::new());
     static SDC_CELL: StaticCell<sdc::SoftdeviceController> = StaticCell::new();
     let sdc = SDC_CELL.init(unwrap!(build_sdc(sdc_p, rng, mpsl, sdc_mem)));
 
@@ -150,11 +167,75 @@ async fn main(spawner: Spawner) {
 	let send = SEND.init(Mutex::new(RefCell::new(send)));
     spawner.must_spawn(receive_task(send, recv, sdc));
 
-    let mut buf = [0; nrf_sdc::raw::HCI_MSG_BUFFER_MAX_SIZE as usize + 1];
+    fn event_used_len(b: &[u8]) -> Option<usize> {
+        if b.len() < 2 { return None; }
+        let n = 2 + b[1] as usize;
+        (n <= b.len()).then_some(n)
+    }
+
+    fn acl_used_len(b: &[u8]) -> Option<usize> {
+        if b.len() < 4 { return None; }
+        let plen = u16::from_le_bytes([b[2], b[3]]) as usize;
+        let n = 4 + plen;
+        (n <= b.len()).then_some(n)
+    }
+
+    fn sync_used_len(b: &[u8]) -> Option<usize> {
+        if b.len() < 3 { return None; }
+        let plen = b[2] as usize;
+        let n = 3 + plen;
+        (n <= b.len()).then_some(n)
+    }
+
+    fn iso_used_len(b: &[u8]) -> Option<usize> {
+        if b.len() < 4 { return None; }
+        let len_psf = u16::from_le_bytes([b[2], b[3]]);
+        let plen = (len_psf & 0x3FFF) as usize;
+        let n = 4 + plen;
+        (n <= b.len()).then_some(n)
+    }
+
+    fn h4_indicator(kind: PacketKind) -> u8 {
+        match kind {
+            PacketKind::Event    => 0x04,
+            PacketKind::AclData  => 0x02,
+            PacketKind::SyncData => 0x03,
+            PacketKind::IsoData  => 0x05,
+            _ => 0xFF,
+        }
+    }
+
+    const IN_MAX: usize  = nrf_sdc::raw::HCI_MSG_BUFFER_MAX_SIZE as usize;
+    const OUT_MAX: usize = IN_MAX + 1;
+
+    let mut inb  = [0u8; IN_MAX];
+    let mut outb = [0u8; OUT_MAX];
+
     loop {
-        let packet = unwrap!(sdc.hci_get(&mut buf[1..]).await);
-        unwrap!(packet.write_hci_async(&mut buf[..]).await);
-        send.lock(|x| x.borrow_mut().send(&buf).unwrap());
+        let kind = unwrap!(sdc.hci_get(&mut inb).await);
+
+        let used = match kind {
+            PacketKind::Event    => event_used_len(&inb),
+            PacketKind::AclData  => acl_used_len(&inb),
+            PacketKind::SyncData => sync_used_len(&inb),
+            PacketKind::IsoData  => iso_used_len(&inb),
+            _ => None,
+        };
+
+        let Some(used) = used else {
+            defmt::warn!("dropping malformed {:?}", kind);
+            continue;
+        };
+
+        debug_assert!(used <= IN_MAX);
+        debug_assert!(1 + used <= OUT_MAX);
+
+        outb[0] = h4_indicator(kind);
+        outb[1..1 + used].copy_from_slice(&inb[..used]);
+        let n = 1 + used;
+
+        defmt::trace!("send {}: {=[u8]:x}", n, &outb[..n]);
+        send.lock(|x| x.borrow_mut().send(&outb[..n]).unwrap());
     }
 }
 
@@ -194,6 +275,7 @@ async fn exec_h4_to_sdc(
     match kind {
         bt_hci::PacketKind::Cmd => {
             let (opcode, payload) = parse_cmd_after_h4(rest)?;
+            defmt::debug!("opcode {}", opcode);
             exec_cmd_by_opcode::<sdc::Error>(send, sdc, opcode, payload).await
         }
         bt_hci::PacketKind::AclData => io!(sdc.hci_data_put(rest)),

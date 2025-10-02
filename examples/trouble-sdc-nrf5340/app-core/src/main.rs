@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod ble_bas_peripheral_bonding;
 mod fake_rng;
 mod init;
 mod transport;
@@ -9,22 +10,15 @@ mod uninit_write_buf;
 use crate::transport::MyTransport;
 use bt_hci::controller::ExternalController;
 use defmt::Debug2Format;
+use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_executor::Spawner;
-use embassy_futures::join::join;
 use embassy_nrf::{
     ipc::{self, Ipc, IpcChannel},
     peripherals,
 };
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_time::{Delay, Duration, Timer};
+use embassy_time::Delay;
 use icmsg::{IcMsg, Notifier, WaitForNotify};
-use trouble_host::{
-    Address, Host, HostResources, Stack,
-    prelude::{
-        AdStructure, Advertisement, AdvertisementParameters, BR_EDR_NOT_SUPPORTED,
-        DefaultPacketPool, LE_GENERAL_DISCOVERABLE,
-    },
-};
 
 use {defmt_rtt as _, panic_probe as _};
 
@@ -94,7 +88,7 @@ pub unsafe fn grant_spu(extdomain_idx: Option<usize>) {
 
     let spu = embassy_nrf::pac::SPU_S;
     let configure_range = |first: u32, last: u32| {
-        for i in first..last+1 {
+        for i in first..last + 1 {
             spu.ramregion(i as usize).perm().write(|w| {
                 w.set_read(true);
                 w.set_write(true);
@@ -117,8 +111,6 @@ pub unsafe fn grant_spu(extdomain_idx: Option<usize>) {
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let (_core_peripherals, p) = init::init();
-
-    defmt::info!("Hello, world!");
 
     unsafe {
         grant_spu(Some(0));
@@ -152,59 +144,13 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    let mut resources: HostResources<DefaultPacketPool, 1, 0, 1> = HostResources::new();
-
     let (send, recv) = icmsg.split();
 
     let driver: MyTransport<NoopRawMutex, _, _> = MyTransport::new(recv, send);
     let controller: ExternalController<_, 10> = ExternalController::new(driver);
 
-    // Using a fixed "random" address can be useful for testing. In real scenarios, one would
-    // use e.g. the MAC 6 byte array as the address (how to get that varies by the platform).
-    let address: Address = Address::random([0xff, 0x8f, 0x19, 0x05, 0xe4, 0xff]);
-    defmt::info!("Our address = {}", address);
-
-    let stack: Stack<'_, _, _> =
-        trouble_host::new(controller, &mut resources).set_random_address(address);
-    let Host {
-        mut peripheral,
-        mut runner,
-        ..
-    } = stack.build();
-
-    let mut adv_data = [0; 31];
-    let len = AdStructure::encode_slice(
-        &[
-            AdStructure::CompleteLocalName(b"Trouble Advert"),
-            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-        ],
-        &mut adv_data[..],
-    )
-    .unwrap();
-
-    defmt::info!("Starting advertising");
-    let _ = join(runner.run(), async {
-        loop {
-            let mut params = AdvertisementParameters::default();
-            params.interval_min = Duration::from_millis(100);
-            params.interval_max = Duration::from_millis(100);
-            let _advertiser = peripheral
-                .advertise(
-                    &params,
-                    Advertisement::NonconnectableScannableUndirected {
-                        adv_data: &[],
-                        scan_data: &adv_data[..len],
-                    },
-                )
-                .await
-                .unwrap();
-            loop {
-                defmt::info!("Still running");
-                Timer::after(Duration::from_secs(60)).await;
-            }
-        }
-    })
-    .await;
+    let mut nvmc = BlockingAsync::new(embassy_nrf::nvmc::Nvmc::new(p.NVMC));
+    ble_bas_peripheral_bonding::run(controller, &mut nvmc).await
 }
 
 struct IpcNotify<'d> {

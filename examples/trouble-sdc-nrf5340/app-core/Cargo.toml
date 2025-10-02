@@ -18,9 +18,12 @@ static_cell = "2.1.1"
 defmt = "1.0.1"
 bt-hci = { version = "0.6.0", features = ["defmt"] }
 embassy-sync = { version = "0.7.2", features = ["defmt"] }
-trouble-host = { git = "https://github.com/embassy-rs/trouble.git", features = ["defmt", "peripheral", "security", "dev-disable-csprng-seed-requirement"] }
+trouble-host = { git = "https://github.com/embassy-rs/trouble.git", features = ["defmt", "controller-host-flow-control", "peripheral", "gatt", "derive", "security", "dev-disable-csprng-seed-requirement"] }
 embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
 embedded-io = { version = "0.6.1", features = ["defmt-03"] }
+embedded-storage-async = "0.4.1"
+sequential-storage = { version = "5.0.1", features = ["defmt-03"] }
+embassy-embedded-hal = { version = "0.5.0", features = ["defmt"] }
 
 [profile.release]
 debug = 2
