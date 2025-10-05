@@ -12,6 +12,8 @@ use embassy_futures::select::{Either, select};
 use embedded_hal_async::delay::DelayNs;
 use transport::IcMsgTransport;
 pub use transport::Notifier;
+
+mod loom;
 pub mod transport;
 #[macro_use]
 mod poll;
@@ -238,17 +240,18 @@ mod tests {
     extern crate std;
 
     use embedded_hal_async::delay::DelayNs;
-    use std::sync::Arc;
     use tokio::sync::Notify;
 
     use crate::{
         Notifier, WaitForNotify,
         transport::{SharedMemoryRegionHeader, tests::SyncThing},
+        loom::{alloc, sync::Arc},
     };
 
     use super::{IcMsg, MemoryConfig};
     use core::{alloc::Layout, time::Duration};
 
+    #[cfg(not(loom))]
     #[tokio::main]
     #[test]
     async fn test_bonding() {
@@ -269,8 +272,8 @@ mod tests {
         let buf_size = 24;
         let shared_region_layout =
             Layout::from_size_align(size_of::<Hdr>() + buf_size, align_of::<Hdr>()).unwrap();
-        let shared_region_1 = unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
-        let shared_region_2 = unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
+        let shared_region_1 = unsafe { alloc::alloc(shared_region_layout) }.cast::<()>();
+        let shared_region_2 = unsafe { alloc::alloc(shared_region_layout) }.cast::<()>();
         let notify_1 = Arc::new(Notify::new());
         let notify_2 = Arc::new(Notify::new());
 
@@ -348,8 +351,8 @@ mod tests {
 
         recv_task.await.unwrap();
         unsafe {
-            std::alloc::dealloc(shared_region_1.cast(), shared_region_layout);
-            std::alloc::dealloc(shared_region_2.cast(), shared_region_layout);
+            alloc::dealloc(shared_region_1.cast(), shared_region_layout);
+            alloc::dealloc(shared_region_2.cast(), shared_region_layout);
         }
     }
 

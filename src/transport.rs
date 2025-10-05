@@ -46,9 +46,10 @@ where
         debug_assert!(recv_buffer_len % 4 == 0);
         debug_assert!(send_region.is_aligned());
         debug_assert!(recv_region.is_aligned());
+
         unsafe {
-            (*send_region).wr_idx.value.store(0, Ordering::Relaxed);
-            (*send_region).rd_idx.value.store(0, Ordering::Relaxed);
+            (&raw mut (*send_region).wr_idx.value).write(LeAtomicU32::new(0));
+            (&raw mut (*send_region).rd_idx.value).write(LeAtomicU32::new(0));
         }
 
         let sender = Sender {
@@ -312,7 +313,7 @@ pub trait Notifier {
 }
 
 mod integer {
-    use core::sync::atomic::{AtomicU32, Ordering};
+    use crate::loom::sync::atomic::{AtomicU32, Ordering};
 
     /// A big-endian u16.
     #[repr(transparent)]
@@ -341,6 +342,9 @@ mod integer {
     pub struct LeAtomicU32(AtomicU32);
 
     impl LeAtomicU32 {
+        pub fn new(value: u32) -> Self {
+            Self(AtomicU32::new(value.to_le()))
+        }
         pub fn load(&self, order: Ordering) -> u32 {
             u32::from_le(self.0.load(order))
         }
@@ -356,6 +360,7 @@ pub mod tests {
 
     use super::{IcMsgTransport, Notifier, RecvError, SharedMemoryRegionHeader};
     use core::{alloc::Layout, mem::offset_of};
+    use crate::loom::{alloc, thread};
 
     #[test]
     fn test_alignment() {
@@ -363,8 +368,20 @@ pub mod tests {
         assert_eq!(offset_of!(SharedMemoryRegionHeader<128>, wr_idx), 128);
     }
 
+    #[cfg(not(loom))]
     #[test]
     fn test_send_recv() {
+        _test_send_recv();
+    }
+
+    #[cfg(loom)]
+    #[test]
+    fn test_send_recv_loom() {
+        loom::model(|| _test_send_recv());
+    }
+
+    fn _test_send_recv() {
+        #[cfg(not(loom))]
         let expected_messages: &[&[u8]] = &[
             b"",
             b"0",
@@ -376,18 +393,24 @@ pub mod tests {
             b"0123456",
             b"01234567",
         ];
+        #[cfg(loom)]
+        let expected_messages: &[&[u8]] = &[
+            b"",
+            b"01234",
+            b"01234567",
+        ]; // fewer messages so loom doesn't take forever
 
         const ALIGN: usize = 4;
         type Hdr = SharedMemoryRegionHeader<ALIGN>;
         let buf_size = 16;
         let shared_region_layout =
             Layout::from_size_align(size_of::<Hdr>() + buf_size, align_of::<Hdr>()).unwrap();
-        let shared_region_1 = unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
-        let shared_region_2 = unsafe { std::alloc::alloc(shared_region_layout) }.cast::<()>();
+        let shared_region_1 = unsafe { alloc::alloc(shared_region_layout) }.cast::<()>();
+        let shared_region_2 = unsafe { alloc::alloc(shared_region_layout) }.cast::<()>();
         let shared_region_sync_1 = SyncThing(shared_region_1);
         let shared_region_sync_2 = SyncThing(shared_region_2);
 
-        let recv_thread = std::thread::spawn(move || {
+        let recv_thread = thread::spawn(move || {
             let shared_region_1 = { shared_region_sync_1 }.0;
             let shared_region_2 = { shared_region_sync_2 }.0;
             let mut icmsg = unsafe {
@@ -405,15 +428,16 @@ pub mod tests {
             for &expected_message in expected_messages {
                 loop {
                     if first {
-                        std::thread::park();
+                        thread::park();
                         first = false;
                     }
                     let r = icmsg.try_recv(&mut buf);
                     if r == Err(RecvError::Empty) {
-                        std::thread::park();
+                        thread::park();
                         continue;
                     }
                     let msg = &buf[..r.unwrap()];
+                    #[cfg(not(loom))]
                     std::eprintln!("recv'd {msg:?}");
                     assert_eq!(msg, expected_message);
                     break;
@@ -434,9 +458,10 @@ pub mod tests {
             loop {
                 let r = icmsg.send(msg);
                 if r.is_err() {
-                    std::thread::yield_now();
+                    thread::yield_now();
                     continue;
                 }
+                #[cfg(not(loom))]
                 std::eprintln!("sent {msg:?}");
                 break;
             }
@@ -444,12 +469,12 @@ pub mod tests {
         recv_thread.join().unwrap();
 
         unsafe {
-            std::alloc::dealloc(shared_region_1.cast(), shared_region_layout);
-            std::alloc::dealloc(shared_region_2.cast(), shared_region_layout);
+            alloc::dealloc(shared_region_1.cast(), shared_region_layout);
+            alloc::dealloc(shared_region_2.cast(), shared_region_layout);
         }
     }
 
-    struct ThreadNotifier<'a>(&'a std::thread::Thread);
+    struct ThreadNotifier<'a>(&'a thread::Thread);
 
     impl Notifier for ThreadNotifier<'_> {
         fn notify(&mut self) {
