@@ -4,7 +4,7 @@ runner = "probe-rs run --chip nRF5340_xxAA"
 
 [build]
 target = "thumbv8m.main-none-eabihf"
-rustflags = "-C target-cpu=cortex-m33 -C force-frame-pointers"
+rustflags = "-C target-cpu=cortex-m33"
 
-[patch."https://github.com/embassy-rs/trouble.git"]
-trouble-host = { path = "../../../../../forks/trouble/host" }
+[env]
+DEFMT_LOG = "info"

@@ -154,11 +154,11 @@ async fn main(_spawner: Spawner) {
 }
 
 struct IpcNotify<'d> {
-    trigger: ipc::EventTrigger<'d, peripherals::IPC>,
+    trigger: ipc::EventTrigger<'d>,
 }
 
 struct IpcWait<'d> {
-    event: ipc::Event<'d, peripherals::IPC>,
+    event: ipc::Event<'d>,
 }
 
 impl Notifier for IpcNotify<'_> {

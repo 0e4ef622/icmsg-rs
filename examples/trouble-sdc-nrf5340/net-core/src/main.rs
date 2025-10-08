@@ -76,7 +76,7 @@ const L2CAP_MTU: usize = 72;
 
 fn build_sdc<'d, const N: usize>(
     p: nrf_sdc::Peripherals<'d>,
-    rng: &'d mut rng::Rng<RNG, Async>,
+    rng: &'d mut rng::Rng<Async>,
     mpsl: &'d MultiprotocolServiceLayer,
     mem: &'d mut sdc::Mem<N>,
 ) -> Result<nrf_sdc::SoftdeviceController<'d>, nrf_sdc::Error> {
@@ -153,11 +153,11 @@ async fn main(spawner: Spawner) {
         p.PPI_CH11, p.PPI_CH12,
     );
 
-    static RNG_CELL: StaticCell<Rng<RNG, Async>> = StaticCell::new();
+    static RNG_CELL: StaticCell<Rng<Async>> = StaticCell::new();
     let rng = RNG_CELL.init(Rng::new(p.RNG, Irqs));
 
-    static SDC_MEM: StaticCell<sdc::Mem<2472>> = StaticCell::new();
-    let sdc_mem = SDC_MEM.init(sdc::Mem::<2472>::new());
+    static SDC_MEM: StaticCell<sdc::Mem<2480>> = StaticCell::new();
+    let sdc_mem = SDC_MEM.init(sdc::Mem::<2480>::new());
     static SDC_CELL: StaticCell<sdc::SoftdeviceController> = StaticCell::new();
     let sdc = SDC_CELL.init(unwrap!(build_sdc(sdc_p, rng, mpsl, sdc_mem)));
 
@@ -309,11 +309,11 @@ async fn receive_task(
 }
 
 struct IpcNotify<'d> {
-    trigger: ipc::EventTrigger<'d, peripherals::IPC>,
+    trigger: ipc::EventTrigger<'d>,
 }
 
 struct IpcWait<'d> {
-    event: ipc::Event<'d, peripherals::IPC>,
+    event: ipc::Event<'d>,
 }
 
 impl Notifier for IpcNotify<'_> {

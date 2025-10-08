@@ -185,7 +185,7 @@ where
         LeLongTermKeyRequestReply,
         LeLongTermKeyRequestNegativeReply,
         LeReadSupportedStates,
-        LeTestEnd,
+        // LeTestEnd,
         LeSetDataLength,
         LeReadSuggestedDefaultDataLength,
         LeWriteSuggestedDefaultDataLength,
