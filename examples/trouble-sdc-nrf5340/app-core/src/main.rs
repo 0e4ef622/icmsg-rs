@@ -2,7 +2,6 @@
 #![no_main]
 
 mod ble_bas_peripheral_bonding;
-mod fake_rng;
 mod init;
 mod transport;
 mod uninit_write_buf;

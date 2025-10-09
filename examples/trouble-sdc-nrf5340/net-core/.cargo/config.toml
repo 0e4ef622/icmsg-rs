@@ -7,4 +7,4 @@ target = "thumbv8m.main-none-eabi"
 rustflags = "-C target-cpu=cortex-m33"
 
 [env]
-DEFMT_LOG = "info"
+DEFMT_LOG = "warn"

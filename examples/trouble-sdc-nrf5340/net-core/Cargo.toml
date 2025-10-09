@@ -7,7 +7,7 @@ edition = "2024"
 defmt-rtt = "1.0.0"
 embassy-executor = { version = "0.9.1", features = ["defmt", "arch-cortex-m", "executor-thread"] }
 embassy-nrf = { version = "0.8.0", features = ["defmt", "time-driver-rtc1", "gpiote", "time", "unstable-pac"] }
-embassy-time = { version = "0.5.0", features = ["defmt"] }
+embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime-ms"] }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", features = ["defmt", "nrf5340-net", "peripheral"] }
 
 cortex-m-rt = "0.7.5"
@@ -39,16 +39,12 @@ overflow-checks = false
 [profile.dev.build-override]
 codegen-units = 8
 debug = false
-debug-assertions = false
 opt-level = 0
-overflow-checks = false
 
 [profile.release.build-override]
 codegen-units = 8
 debug = true
-debug-assertions = true
 opt-level = 0
-overflow-checks = true
 
 [patch.crates-io]
 # needs https://github.com/embassy-rs/bt-hci/pull/63

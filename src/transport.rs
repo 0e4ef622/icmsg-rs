@@ -264,11 +264,22 @@ pub enum SendError {
     InvalidState,
 }
 
-impl embedded_io_async::Error for SendError {
-    fn kind(&self) -> embedded_io_async::ErrorKind {
+impl core::fmt::Display for SendError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SendError::InsufficientCapacity => write!(f, "insufficient capacity"),
+            SendError::InvalidState => write!(f, "invalid state"),
+        }
+    }
+}
+
+impl core::error::Error for SendError {}
+
+impl embedded_io::Error for SendError {
+    fn kind(&self) -> embedded_io::ErrorKind {
         match &self {
-            Self::InsufficientCapacity => embedded_io_async::ErrorKind::WriteZero,
-            Self::InvalidState => embedded_io_async::ErrorKind::Other,
+            Self::InsufficientCapacity => embedded_io::ErrorKind::WriteZero,
+            Self::InvalidState => embedded_io::ErrorKind::Other,
         }
     }
 }
@@ -284,12 +295,24 @@ pub enum RecvError {
     InvalidMessage,
 }
 
-impl embedded_io_async::Error for RecvError {
-    fn kind(&self) -> embedded_io_async::ErrorKind {
+impl core::fmt::Display for RecvError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            RecvError::MessageTooBig => write!(f, "message too big"),
+            RecvError::Empty => write!(f, "empty"),
+            RecvError::InvalidMessage => write!(f, "invalid message"),
+        }
+    }
+}
+
+impl core::error::Error for RecvError {}
+
+impl embedded_io::Error for RecvError {
+    fn kind(&self) -> embedded_io::ErrorKind {
         match &self {
-            Self::MessageTooBig => embedded_io_async::ErrorKind::OutOfMemory,
-            Self::Empty => embedded_io_async::ErrorKind::Interrupted,
-            Self::InvalidMessage => embedded_io_async::ErrorKind::Other,
+            Self::MessageTooBig => embedded_io::ErrorKind::OutOfMemory,
+            Self::Empty => embedded_io::ErrorKind::Interrupted,
+            Self::InvalidMessage => embedded_io::ErrorKind::Other,
         }
     }
 }

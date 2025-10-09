@@ -7,7 +7,7 @@ edition = "2024"
 defmt-rtt = "1.0.0"
 embassy-executor = { version = "0.9.1", features = ["defmt", "arch-cortex-m", "executor-thread"] }
 embassy-nrf = { version = "0.8.0", features = ["nrf5340-app-s", "defmt", "time-driver-rtc1", "gpiote", "time", "unstable-pac"] }
-embassy-time = { version = "0.5.0", features = ["defmt"] }
+embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime-ms"] }
 embassy-futures = { version = "0.1.2", features = ["defmt"] }
 
 cortex-m-rt = "0.7.5"

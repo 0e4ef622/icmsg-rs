@@ -10,7 +10,6 @@ use core::pin::pin;
 
 use embassy_futures::select::{Either, select};
 use embedded_hal_async::delay::DelayNs;
-use embedded_io_async::{ErrorKind, ErrorType, Error};
 use transport::IcMsgTransport;
 pub use transport::Notifier;
 
@@ -151,24 +150,6 @@ where
     }
 }
 
-impl<M, const ALIGN: usize> ErrorType for Sender<M, ALIGN>
-where
-    M: Notifier,
-    elain::Align<ALIGN>: elain::Alignment,
-{
-    type Error = ErrorKind;
-}
-
-impl<M, const ALIGN: usize> embedded_io_async::Write for Sender<M, ALIGN>
-where
-    M: Notifier,
-    elain::Align<ALIGN>: elain::Alignment,
-{
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.send(buf).map(|_| buf.len()).map_err(|e| e.kind())
-    }
-}
-
 pub struct Receiver<W, const ALIGN: usize>
 where
     W: WaitForNotify,
@@ -205,24 +186,6 @@ where
                 Err(e) => return Err(e),
             }
         }
-    }
-}
-
-impl<W, const ALIGN: usize> ErrorType for Receiver<W, ALIGN>
-where
-    W: WaitForNotify,
-    elain::Align<ALIGN>: elain::Alignment,
-{
-    type Error = ErrorKind;
-}
-
-impl<W, const ALIGN: usize> embedded_io_async::Read for Receiver<W, ALIGN>
-where
-    W: WaitForNotify,
-    elain::Align<ALIGN>: elain::Alignment,
-{
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        self.recv(buf).await.map_err(|e| e.kind())
     }
 }
 

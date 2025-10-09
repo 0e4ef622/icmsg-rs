@@ -13,12 +13,10 @@ impl<'a> UninitWriteBuf<'a> {
         Self { raw, pos: 0 }
     }
 
-    pub fn _len(&self) -> usize {
-        self.pos
-    }
     pub fn capacity(&self) -> usize {
         self.raw.len()
     }
+
     pub fn remaining(&self) -> usize {
         self.capacity().saturating_sub(self.pos)
     }
