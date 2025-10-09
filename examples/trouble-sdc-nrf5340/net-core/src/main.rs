@@ -101,7 +101,7 @@ async fn main(spawner: Spawner) {
     defmt::info!("Hello, world!");
 
     // give myself a second to attach without panic. uncomment for debug
-    embassy_time::Timer::after_secs(3).await;
+    // embassy_time::Timer::after_secs(3).await;
 
     let mut ipc = Ipc::new(p.IPC, Irqs);
     ipc.event0.configure_trigger([IpcChannel::Channel0]);

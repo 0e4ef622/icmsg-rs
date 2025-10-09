@@ -77,6 +77,8 @@ macro_rules! dispatch_cmd {
 
                 // Return parameters RLEN bytes: copy from the parsed Return value.
                 unsafe {
+                    // TODO this is a sketchy hack around the lack of WriteHci for command
+                    // responses
                     let src = core::slice::from_raw_parts((&ret as *const _ as *const u8), RLEN);
                     buf[HEAD .. HEAD + RLEN].copy_from_slice(src);
                 }
