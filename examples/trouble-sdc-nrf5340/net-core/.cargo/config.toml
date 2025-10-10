@@ -4,7 +4,6 @@ runner = "probe-rs run --chip nRF5340_xxAA"
 
 [build]
 target = "thumbv8m.main-none-eabi"
-rustflags = "-C target-cpu=cortex-m33"
 
 [env]
 DEFMT_LOG = "warn"
