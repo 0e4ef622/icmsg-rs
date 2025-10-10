@@ -1,7 +1,6 @@
 use embassy_nrf::{
     Peripherals,
     config::{Config, HfclkSource, HfxoCapacitance, LfclkSource, LfxoCapacitance},
-    gpio::{Input, Pull},
     pac,
 };
 

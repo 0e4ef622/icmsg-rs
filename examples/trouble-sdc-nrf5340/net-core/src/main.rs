@@ -8,7 +8,7 @@ use core::cell::RefCell;
 
 use crate::{cmd_dispatch::exec_cmd_by_opcode, icmsg_config::ALIGN};
 use bt_hci::{
-    FromHciBytes, PacketKind, cmd::{self, Opcode, OpcodeGroup}, param
+    cmd::{self, Opcode, OpcodeGroup}, data::{AclPacketHeader, IsoPacketHeader, SyncPacketHeader}, event::EventPacketHeader, param, FromHciBytes, FromHciBytesError, PacketKind
 };
 use defmt::{Debug2Format, unwrap};
 use embassy_executor::Spawner;
@@ -163,80 +163,42 @@ async fn main(spawner: Spawner) {
 
     let (send, recv) = icmsg.split();
 
-	static SEND: StaticCell<Mutex<NoopRawMutex, RefCell<icmsg::Sender<IpcNotify<'static>, ALIGN>>>> = StaticCell::new();
-	let send = SEND.init(Mutex::new(RefCell::new(send)));
+    static SEND: StaticCell<Mutex<NoopRawMutex, RefCell<icmsg::Sender<IpcNotify<'static>, ALIGN>>>> = StaticCell::new();
+    let send = SEND.init(Mutex::new(RefCell::new(send)));
     spawner.must_spawn(receive_task(send, recv, sdc));
 
-    fn event_used_len(b: &[u8]) -> Option<usize> {
-        if b.len() < 2 { return None; }
-        let n = 2 + b[1] as usize;
-        (n <= b.len()).then_some(n)
-    }
-
-    fn acl_used_len(b: &[u8]) -> Option<usize> {
-        if b.len() < 4 { return None; }
-        let plen = u16::from_le_bytes([b[2], b[3]]) as usize;
-        let n = 4 + plen;
-        (n <= b.len()).then_some(n)
-    }
-
-    fn sync_used_len(b: &[u8]) -> Option<usize> {
-        if b.len() < 3 { return None; }
-        let plen = b[2] as usize;
-        let n = 3 + plen;
-        (n <= b.len()).then_some(n)
-    }
-
-    fn iso_used_len(b: &[u8]) -> Option<usize> {
-        if b.len() < 4 { return None; }
-        let len_psf = u16::from_le_bytes([b[2], b[3]]);
-        let plen = (len_psf & 0x3FFF) as usize;
-        let n = 4 + plen;
-        (n <= b.len()).then_some(n)
-    }
-
-    fn h4_indicator(kind: PacketKind) -> u8 {
-        match kind {
-            PacketKind::Event    => 0x04,
-            PacketKind::AclData  => 0x02,
-            PacketKind::SyncData => 0x03,
-            PacketKind::IsoData  => 0x05,
-            _ => 0xFF,
-        }
-    }
-
-    const IN_MAX: usize  = nrf_sdc::raw::HCI_MSG_BUFFER_MAX_SIZE as usize;
-    const OUT_MAX: usize = IN_MAX + 1;
-
-    let mut inb  = [0u8; IN_MAX];
-    let mut outb = [0u8; OUT_MAX];
+    const OUT_MAX: usize = nrf_sdc::raw::HCI_MSG_BUFFER_MAX_SIZE as usize + 1;
+    let mut buffer = [0u8; OUT_MAX];
 
     loop {
-        let kind = unwrap!(sdc.hci_get(&mut inb).await);
+        let pkt_data = &mut buffer[1..];
+        let kind = unwrap!(sdc.hci_get(pkt_data).await);
+        let used = unwrap!(packet_len(kind, pkt_data));
 
-        let used = match kind {
-            PacketKind::Event    => event_used_len(&inb),
-            PacketKind::AclData  => acl_used_len(&inb),
-            PacketKind::SyncData => sync_used_len(&inb),
-            PacketKind::IsoData  => iso_used_len(&inb),
-            _ => None,
-        };
+        assert!(1 + used <= buffer.len());
 
-        let Some(used) = used else {
-            defmt::warn!("dropping malformed {:?}", kind);
-            continue;
-        };
-
-        debug_assert!(used <= IN_MAX);
-        debug_assert!(1 + used <= OUT_MAX);
-
-        outb[0] = h4_indicator(kind);
-        outb[1..1 + used].copy_from_slice(&inb[..used]);
+        buffer[0] = kind as u8;
         let n = 1 + used;
 
-        defmt::trace!("send {}: {=[u8]:x}", n, &outb[..n]);
-        send.lock(|x| x.borrow_mut().send(&outb[..n]).unwrap());
+        defmt::trace!("send {}: {=[u8]:x}", n, &buffer[..n]);
+        send.lock(|x| x.borrow_mut().send(&buffer[..n]).unwrap());
     }
+}
+
+fn packet_len(kind: PacketKind, data: &[u8]) -> Result<usize, FromHciBytesError> {
+    Ok(match kind {
+        PacketKind::Cmd => {
+            if data.len() < 3 {
+                return Err(FromHciBytesError::InvalidSize)
+            } else {
+                data[2] as usize + 3
+            }
+        }
+        PacketKind::AclData => AclPacketHeader::from_hci_bytes(data)?.0.data_len() + 4,
+        PacketKind::SyncData => SyncPacketHeader::from_hci_bytes(data)?.0.data_len() + 3,
+        PacketKind::Event => EventPacketHeader::from_hci_bytes(data)?.0.params_len as usize + 2,
+        PacketKind::IsoData => IsoPacketHeader::from_hci_bytes(data)?.0.data_load_len() + 4,
+    })
 }
 
 type CmdErr = cmd::Error<sdc::Error>;
