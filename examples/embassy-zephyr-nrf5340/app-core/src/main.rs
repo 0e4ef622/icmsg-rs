@@ -15,11 +15,12 @@ embassy_nrf::bind_interrupts!(struct Irqs {
 });
 
 mod icmsg_config {
+    #[allow(improper_ctypes)]
     unsafe extern "C" {
-        static mut __icmsg_tx_start: u32;
-        static __icmsg_tx_end: u32;
-        static mut __icmsg_rx_start: u32;
-        static __icmsg_rx_end: u32;
+        static mut __icmsg_tx_start: ();
+        static __icmsg_tx_end: ();
+        static mut __icmsg_rx_start: ();
+        static __icmsg_rx_end: ();
     }
 
     pub const ALIGN: usize = 4;
@@ -114,11 +115,11 @@ async fn receive(mut recv: icmsg::Receiver<IpcWait<'static>, { icmsg_config::ALI
 }
 
 struct IpcNotify<'d> {
-    trigger: ipc::EventTrigger<'d, peripherals::IPC>,
+    trigger: ipc::EventTrigger<'d>,
 }
 
 struct IpcWait<'d> {
-    event: ipc::Event<'d, peripherals::IPC>,
+    event: ipc::Event<'d>,
 }
 
 impl Notifier for IpcNotify<'_> {
